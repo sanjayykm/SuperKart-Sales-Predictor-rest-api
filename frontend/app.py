@@ -104,4 +104,5 @@ if uploaded_file is not None:
             predictions = response.json()
             st.success("Batch predictions completed!")
             st.write(predictions)  # Display the predictions
-        else:            
+        else:
+            st.error("Unable to connect to the prediction API.")

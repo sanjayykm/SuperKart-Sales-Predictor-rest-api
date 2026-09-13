@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # Load the pre-trained model
-model = joblib.load(saved_model_path)
+model = joblib.load("super_kart_model_v1_0.joblib")
 
 # Initialize Flask app
 superkart_api = Flask("Superkart Predictor")
