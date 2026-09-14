@@ -1,5 +1,6 @@
 import os
 import requests
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="SuperKart Sales Predictor", page_icon="🛒", layout="centered")
@@ -9,7 +10,7 @@ st.caption("Enter product + store details → get predicted sales total.")
 
 # Backend URL (set this in Hugging Face Space Secrets / env vars)
 # Example: https://<your-backend-space>.hf.space
-BACKEND_BASE_URL = "http://backend:7860"
+BACKEND_BASE_URL = os.getenv("BACKEND_URL", "http://172.18.0.1:7860")
 PREDICT_URL = f"{BACKEND_BASE_URL}/v1/predict"
 PREDICT_BATCH_URL = f"{BACKEND_BASE_URL}/v1/predictbatch"
 
@@ -88,21 +89,66 @@ if submitted:
         except requests.exceptions.RequestException as e:
             st.error("Failed to reach backend API.")
             st.write(str(e))
-            st.info("If deployed on Hugging Face: set BACKEND_BASE_URL correctly in Space Secrets.")
 
 # Section for batch prediction
+# ---- Batch Prediction ----
 st.subheader("Batch Prediction")
 
-# Allow users to upload a CSV file for batch prediction
-uploaded_file = st.file_uploader("Upload CSV file for batch prediction", type=["csv"])
+uploaded_file = st.file_uploader(
+    "Upload CSV file for batch prediction",
+    type=["csv"]
+)
 
-# Make batch prediction when the "Predict Batch" button is clicked
 if uploaded_file is not None:
     if st.button("Predict Batch", type="primary"):
-        response = requests.post(PREDICT_BATCH_URL, files={"file": uploaded_file})  # Send file to Flask API
-        if response.status_code == 200:
-            predictions = response.json()
-            st.success("Batch predictions completed!")
-            st.write(predictions)  # Display the predictions
-        else:
-            st.error("Unable to connect to the prediction API.")
+
+        try:
+            # Read CSV once for displaying later
+            uploaded_file.seek(0)
+            input_df = pd.read_csv(uploaded_file)
+
+            # Reset file pointer before sending to backend
+            uploaded_file.seek(0)
+
+            response = requests.post(
+                PREDICT_BATCH_URL,
+                files={
+                    "file": (
+                        uploaded_file.name,
+                        uploaded_file.getvalue(),
+                        "text/csv"
+                    )
+                },
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+
+                st.success(
+                    f"Batch predictions completed — {result['n_rows']} rows"
+                )
+
+                preds = pd.DataFrame(result["predictions"])
+
+                output = pd.concat(
+                    [
+                        input_df.reset_index(drop=True),
+                        preds["predicted_sales_total"].reset_index(drop=True)
+                    ],
+                    axis=1
+                )
+
+                st.dataframe(output)
+
+            else:
+                st.error(f"API error ({response.status_code})")
+                st.code(response.text)
+
+        except requests.exceptions.RequestException as e:
+            st.error("Failed to reach backend API.")
+            st.write(str(e))
+
+        except Exception as e:
+            st.error("Batch prediction failed.")
+            st.write(str(e))

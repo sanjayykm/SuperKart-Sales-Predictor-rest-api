@@ -64,27 +64,55 @@ def predict():
 
 # Define an endpoint for batch prediction (POST request)
 @superkart_api.post('/v1/predictbatch')
-def predict_rental_price_batch():
+def predict_batch():
     """
-    This function handles POST requests to the '/v1/predictbatch' endpoint.
-    It expects a CSV file containing property details for multiple properties
-    and returns the predicted rental prices as a dictionary in the JSON response.
+    Handles POST requests to '/v1/predictbatch'.
+    Expects a CSV file (multipart form field 'file') containing product +
+    store details, and returns predicted sales totals as JSON.
     """
-    # Get the uploaded CSV file from the request
-    file = request.files['file']
+    EXPECTED_COLUMNS = [
+        "Product_Weight", "Product_Sugar_Content", "Product_Type",
+        "Product_MRP", "Store_Size", "Store_Location_City_Type",
+        "Store_Type", "Store_Age",
+    ]
 
-    # Read the CSV file into a Pandas DataFrame
-    input_data = pd.read_csv(file)
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part named 'file' in the request"}), 400
 
-    # Make predictions for all properties in the DataFrame (get log_prices)
-    predicted_prices = model.predict(input_data).tolist()
+    try:
+        input_data = pd.read_csv(request.files['file'])
+    except Exception as e:
+        return jsonify({"error": f"Could not parse CSV: {e}"}), 400
 
-    # Create a dictionary of predictions with property IDs as keys
-    property_ids = input_data['Product_Id_char'].tolist()  # Assuming 'id' is the property ID column
-    output_dict = dict(zip(property_ids, predicted_prices))  # Use actual prices
+    if input_data.empty:
+        return jsonify({"error": "Uploaded CSV contains no rows"}), 400
 
-    # Return the predictions dictionary as a JSON response
-    return output_dict
+    missing = [c for c in EXPECTED_COLUMNS if c not in input_data.columns]
+    if missing:
+        return jsonify({"error": f"Missing required columns: {missing}"}), 400
+
+    try:
+        features = input_data[EXPECTED_COLUMNS].copy()
+
+        # match the normalization applied during training
+        features["Product_Sugar_Content"] = (
+            features["Product_Sugar_Content"].str.strip().str.lower()
+        )
+
+        predictions = model.predict(features).tolist()
+        logging.info(f"Batch prediction: {len(predictions)} rows")
+
+        return jsonify({
+            "n_rows": len(predictions),
+            "predictions": [
+                {"row": i, "predicted_sales_total": round(p, 2)}
+                for i, p in enumerate(predictions)
+            ],
+        }), 200
+
+    except Exception as e:
+        logging.exception("Batch prediction failed")
+        return jsonify({"error": str(e)}), 500
 
 # Run the Flask application in debug mode if this script is executed directly
 if __name__ == '__main__':
